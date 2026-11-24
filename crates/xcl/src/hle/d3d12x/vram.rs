@@ -226,6 +226,7 @@ struct Pages {
     /// signalled after each mapping; title queues wait for it before their next work
     fence: ID3D12Fence,
     value: u64,
+    pool_properties: D3D12_HEAP_PROPERTIES,
     pools: Vec<ID3D12Heap>,
     free: Vec<Tile>,
     /// tiles given back, reusable after `COOL`
@@ -249,6 +250,19 @@ unsafe impl Send for Pages {}
 /// device raw pointer → its pages (None inside: tiled tier < 2 on this device)
 static PAGES: Mutex<std::collections::BTreeMap<usize, Option<Pages>>> = Mutex::new(std::collections::BTreeMap::new());
 
+fn texture_pool_properties(system_memory: bool) -> D3D12_HEAP_PROPERTIES {
+    if system_memory {
+        D3D12_HEAP_PROPERTIES {
+            Type: D3D12_HEAP_TYPE_CUSTOM,
+            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE,
+            MemoryPoolPreference: D3D12_MEMORY_POOL_L0,
+            ..Default::default()
+        }
+    } else {
+        D3D12_HEAP_PROPERTIES { Type: D3D12_HEAP_TYPE_DEFAULT, ..Default::default() }
+    }
+}
+
 impl Pages {
     unsafe fn new(dev: &ID3D12Device) -> Option<Pages> {
         let mut o = D3D12_FEATURE_DATA_D3D12_OPTIONS::default();
@@ -260,11 +274,16 @@ impl Pages {
         }
         let queue: ID3D12CommandQueue = dev.CreateCommandQueue(&D3D12_COMMAND_QUEUE_DESC::default()).ok()?;
         let fence: ID3D12Fence = dev.CreateFence(0, D3D12_FENCE_FLAG_NONE).ok()?;
+        let system_memory = std::env::var("XCL_TEXTURE_PAGES_SYSTEM_MEMORY").is_ok_and(|value| value.trim() == "1");
+        if system_memory {
+            crate::xlog_info!("D3D12.X: title texture page pools use system memory (D3D12_MEMORY_POOL_L0)");
+        }
         crate::xlog_info!("D3D12.X: textures in title memory: tiled resources on 64 KiB pages of video memory, one per page of the title's");
         Some(Pages {
             queue,
             fence,
             value: 0,
+            pool_properties: texture_pool_properties(system_memory),
             pools: Vec::new(),
             free: Vec::new(),
             cooling: std::collections::VecDeque::new(),
@@ -290,7 +309,7 @@ impl Pages {
         }
         let desc = D3D12_HEAP_DESC {
             SizeInBytes: POOL_PAGES as u64 * PAGE as u64,
-            Properties: D3D12_HEAP_PROPERTIES { Type: D3D12_HEAP_TYPE_DEFAULT, ..Default::default() },
+            Properties: self.pool_properties,
             Alignment: 0,
             // every kind of texture (resource heap tier 2: the only flags for both)
             Flags: D3D12_HEAP_FLAG_NONE,
@@ -718,6 +737,18 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const MIB: usize = 1 << 20;
+
+    #[test]
+    fn texture_pools_use_system_memory_only_when_requested() {
+        let default = texture_pool_properties(false);
+        assert_eq!(default.Type, D3D12_HEAP_TYPE_DEFAULT);
+        assert_eq!(default.MemoryPoolPreference, D3D12_MEMORY_POOL_UNKNOWN);
+
+        let system = texture_pool_properties(true);
+        assert_eq!(system.Type, D3D12_HEAP_TYPE_CUSTOM);
+        assert_eq!(system.CPUPageProperty, D3D12_CPU_PAGE_PROPERTY_NOT_AVAILABLE);
+        assert_eq!(system.MemoryPoolPreference, D3D12_MEMORY_POOL_L0);
+    }
 
     /// One call per heap: its tiles in runs, the other heaps' skipped.
     #[test]

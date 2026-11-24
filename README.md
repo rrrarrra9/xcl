@@ -124,6 +124,8 @@ xcl rpf D:\data\shaders.rpf --extract NAME --out folder
 - XCL works on **unpacked** game files you own; it contains nothing for decrypting or
   circumventing DRM.
 - **The game folder is never modified** – writes go to the overlay.
+- With `XCL_TEXTURE_PAGES_SYSTEM_MEMORY=1`, title texture page pools use system memory (D3D12 L0).
+  On discrete GPUs, this reduces local VRAM use at the cost of GPU memory bandwidth.
 - Translated shaders are reused across XCL rebuilds when the translator sources and DXC
   toolchain are unchanged; `XCL_TRANSLATED_CACHE=0` disables that disk cache.
 - With `XCL_DRED=1`, a D3D12 device removal logs GPU breadcrumbs in `xcl.log`.
