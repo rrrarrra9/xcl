@@ -56,13 +56,20 @@ pub fn host_main(boot_path: &Path) -> i32 {
                     K32GetProcessMemoryInfo(windows_sys::Win32::System::Threading::GetCurrentProcess(), &mut c as *mut _ as *mut _, c.cb);
                     c.PrivateUsage
                 };
-                let (local, non_local) = crate::hle::d3d12x::real::video_memory().unwrap_or((0, 0));
+                let mb = |b: u64| b >> 20;
+                let (local, non_local, dxgi_budget) = match crate::hle::d3d12x::real::video_memory_info() {
+                    Some((local, non_local)) => (
+                        local.CurrentUsage,
+                        non_local.CurrentUsage,
+                        format!("{} MB local, {} MB non-local", mb(local.Budget), mb(non_local.Budget)),
+                    ),
+                    None => (0, 0, "unavailable".into()),
+                };
                 let (arenas, arenas_made) = crate::hle::d3d12x::vram::arena_bytes();
                 let (pools, pools_mapped) = crate::hle::d3d12x::sparse::pool_bytes();
                 let (pages, page_pools) = crate::hle::d3d12x::vram::page_bytes();
-                let mb = |b: u64| b >> 20;
                 crate::xlog_info!(
-                    "memory: {} MB committed by the process; video memory {} MB local, {} MB non-local; target pages {} MB (pools {} MB); arenas {} MB in use, {} MB made; sparse pools {} MB ({} MB mapped)",
+                    "memory: {} MB committed by the process; video memory {} MB local, {} MB non-local; target pages {} MB (pools {} MB); arenas {} MB in use, {} MB made; sparse pools {} MB ({} MB mapped); DXGI budget {}",
                     mb(private as u64),
                     mb(local),
                     mb(non_local),
@@ -71,7 +78,8 @@ pub fn host_main(boot_path: &Path) -> i32 {
                     mb(arenas as u64),
                     mb(arenas_made as u64),
                     mb(pools as u64),
-                    mb(pools_mapped as u64)
+                    mb(pools_mapped as u64),
+                    dxgi_budget
                 );
                 last = now;
             }
